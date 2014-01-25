@@ -5,6 +5,30 @@ currentPage = 'main'
 prettifier = null
 emptyStringRe = /^\s*$/
 
+# Works with `global` instead of `window` when available (nodejs environment), no Backbone dependency,
+# no ev[ai]l for rendering variables and a shorter `{...}` syntax.
+window.t = (id, vars = {}) ->
+  (i18n[__locale][id] or i18n.en[id] or "(?) #{id}")
+    .replace /\{(\w+)\}/g, (a, k) -> vars[k] or "?#{k}"
+
+i18n=
+  nl:
+    'Hello, {world}': '{world} hallo!'
+    "Program error! Please report to developer! Error: {html}\n\nYou may try to continue by pressing OK.":
+      "Programma fout! Aub melden aan ontwikkelaar. Fout: {html}\n\n\Je kunt proberen verder te gaan door op OK te drukken."
+    "Cannot change font: {e}": "Kan lettertype niet wijzigen: {e}"
+    "Stopping": "Aan het stoppen"
+    "Starting": "Aan het starten"
+    "Speech recognition error: {event.error}": "Spraakherkenning fout: {event.error}"
+    "# The first word is the language code, used by the speech recognition engine.":
+      "# Het eerste woord is de taalcode die door de spraakherkenning gebruikt wordt."
+    "# The rest of the line is just a label for the language selection box.":
+      "# De rest van de regel is slechts een label voor het keuzemenu."
+    "At least one language must be specified.": "Tenminste één taal moet geselecteerd zijn."
+    "Invalid line:\n {line}": "Ongeldige regel:\n {line}"
+
+__locale = 'nl'
+
 escapeHTML = (text) -> text
 	.replace(/&/g,'&amp;')
 	.replace(/</g,'&lt;')
@@ -21,7 +45,7 @@ $ ->
 			return
 
 bug = (html) ->
-	alert "Program error! Please report to developer!\nError: #{html}\n\nYou may try to continue by pressing OK."
+	alert t "Program error! Please report to developer!\nError: {html}\n\nYou may try to continue by pressing OK.", html: html
 	return $.Deferred.reject(escapeHTML(html))
 
 doing = null
@@ -78,7 +102,7 @@ setTextFont = (font) ->
 			'font-family': (family or 'Arial')
 			'font-size': Number(size or 14)
 	catch e
-		alert("Cannot change font: #{e}")
+		alert t "Cannot change font: {e}"
 	return
 
 $ ->
@@ -219,10 +243,10 @@ toggleListening = ->
 	if $("#start").prop('disabled') is true
 		return # already starting or stopping
 	if listening
-		changeStatus("Stopping")
+		changeStatus t "Stopping"
 		recognition.stop()
 	else
-		changeStatus("Starting")
+		changeStatus t "Starting"
 		recognition.lang = $('#language').val()
 		recognition.start()
 	return
@@ -247,7 +271,7 @@ startRecognizer = ->
 
 	recognition.onerror = (event) ->
 		console.log event
-		alert("Speech recognition error: #{event.error}")
+		alert t "Speech recognition error: {event.error}"
 		return
 
 	recognition.onresult = (event) ->
@@ -345,39 +369,34 @@ class LanguagesSelectionPage extends SingleTextboxPage
 	name: 'langs'
 	constructor: ->
 		@default = """
-			# The first word is the language code, used by the speech recognition engine.
-			# The rest of the line is just a label for the language selection box.
-			pt-BR Portuguese
-			en-US English
-
-			# What language code should be used for Esperanto?
-			eo Esperanto
-			eo-EO Esperanto
-			"""
+#{t "# The first word is the language code, used by the speech recognition engine."}
+#{t "# The rest of the line is just a label for the language menu list."}
+nl-NL Nederlands
+en-US English"""
 		createLanguageList 'lang', (code, language) =>
 			@textarea.val("#{code} #{language}\n\n#{@textarea.val()}")
 			return
 		super
 	validate: ->
 		if @count() is 0
-			return "At least one language must be specified."
+			return t "At least one language must be specified."
 		return null # no error
 	parse: (data) ->
 		defer = $.Deferred()
-		select = $('#language').empty()
+		ul = $('#language').empty()
 		for line in data.split(/\r*\n+/)
 			if /^\s*(#|$)/.test(line)
 				# Comment or empty
 			else if mo = line.match(/^\s*(\S+)\s+(\S.*)$/)
-				$('<option>')
+				$('<li>')
 					.text(mo[2] + " (" + mo[1] + ")")
-					.attr('value', mo[1])
-					.appendTo(select)
+					.add('<a href="#">' + mo[1] + '</a>')
+					.appendTo(ul)
 			else
-				return defer.reject("Invalid line:\n#{ line }")
+				return defer.reject(t "Invalid line:\n {line}")
 		defer.resolve()
 	count: ->
-		$('#language > option').length
+		$('#language > li').length
 
 class PrettifyRulesPage extends SingleTextboxPage
 	name: 'rules'
@@ -385,11 +404,15 @@ class PrettifyRulesPage extends SingleTextboxPage
 	constructor: ->
 		@default = """
 			# Capitalize these words anywhere.
-			[ /\\b(google|microsoft|portuguese|english|fastville|esperanto|português|inglês)\\b/g, capitalize ]
+			[ /\\b(google|microsoft|nederlandse|english|nederland|tilburg|wellnessbon|green wellness)\\b/g, capitalize ]
 			[ /(free|open|net|dragon)bsd\\b/gi, function(_, a) { return capitalize(a) + 'BSD' } ]
 
 			# Capitalize the first letter of each line.
 			[ /^\\w/gm, capitalize ]
+
+      # Replace literals with punctuation signs
+      [ /\\komma\\b/gi, ', ' ]
+      [ /\\punt\\b/gi, '. ' ]
 
 			# Capitalize the first letter after .?!
 			[ /([.?!] )(\\w)/g, function(_, a, b) { return a + capitalize(b) } ]
@@ -400,6 +423,8 @@ class PrettifyRulesPage extends SingleTextboxPage
 			# Commonly misrecognized words.
 			[ /\\big\\b/gi, 'e' ]
 			[ /\\buol\\b/gi, 'ou' ]
+      [ /\\welmers\\b/gi, 'wellness' ]
+      [ /\\zijden\\b/gi, 'zij de' ]
 			"""
 		@iframe = $.Deferred()
 		addEventListener 'message', (event) =>
@@ -447,18 +472,18 @@ class SnippetsPage extends SingleTextboxPage
 		super
 	parse: (data) ->
 		defer = $.Deferred()
-		select = $('#snippets').empty()
-		$('<option>')
-			.attr('value', "")
-			.appendTo(select)
+		ul = $('#snippets').empty()
+		$('<li>')
+			.add('<a href="#"></a>')
+			.appendTo(ul)
 		for line in data.split(/\r*\n+/)
 			if /^\s*(#|$)/.test(line)
 				# Comment or empty
 			else
-				$('<option>')
+				$('<li>')
 					.text(line)
-					.attr('value', line)
-					.appendTo(select)
+					.add('<a href="#">' + line + '</a>')
+					.appendTo(ul)
 		defer.resolve()
 
 class FontsPage extends SingleTextboxPage
@@ -466,25 +491,25 @@ class FontsPage extends SingleTextboxPage
 	constructor: ->
 		@default = """
 			# Font name, size:
+      Andale Mono, 20
+      Consolas, 28
 			Monospace, 14
 			Arial, 12
 			Trebuchet MS, 14
-			Andale Mono, 16
-			Consolas, 28
 			"""
 		super
 	parse: (data) ->
 		defer = $.Deferred()
-		select = $('#font').empty()
+		ul = $('#font').empty()
 		for line in data.split(/\r*\n+/)
 			if /^\s*(#|$)/.test(line)
 				# Comment or empty
 			else
-				$('<option>')
+				$('<li>')
 					.text(line)
-					.attr('value', line)
-					.appendTo(select)
-		setTextFont(select.val())
+					.add('<a href="#">' + line + '</a>')
+					.appendTo(ul)
+		#setTextFont(ul.val()) #### wont work
 		defer.resolve()
 
 class ValueAutoSaver
